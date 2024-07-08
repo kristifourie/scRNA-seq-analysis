@@ -1,0 +1,70 @@
+---
+title: "scRNA seq processing"
+author: "Kristi Fourie"
+date: "2024-07-08"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load necessary libraries
+library(Seurat)
+library(dplyr)
+```
+
+# Seurat Data Processing
+This script demonstrates the preprocessing of single-cell RNA sequencing (scRNA-seq) data using the Seurat package (v5.1.0). 
+The workflow includes quality control, data normalization, identification of variable features, and scaling of data for both tumorigenic and non-tumorigenic samples. The processed data is saved at the end for future analyses.
+
+## Loading 10x Data
+```{load_data}
+# Load your data (replace with actual data loading code)
+tumor_data <- Read10X(data.dir = "path/to/tumor_data")
+healthy_data <- Read10X(data.dir = "path/to/healthy_data")
+
+```
+
+## Create Seurat Objects
+```{seurat_objects}
+# Create Seurat objects for both tumorigenic and non-tumorigenic samples
+tumor <- CreateSeuratObject(counts = tumor_data, min.cells = 3, min.features = 200)
+healthy <- CreateSeuratObject(counts = healthy_data, min.cells = 3, min.features = 200)
+```
+
+## Quality Control
+```{quality_control}
+# Filter out cells with more than 5% mitochondrial gene expression
+tumor[["percent.mt"]] <- PercentageFeatureSet(tumor, pattern = "^MT-")
+healthy[["percent.mt"]] <- PercentageFeatureSet(healthy, pattern = "^MT-")
+
+tumor <- subset(tumor, subset = percent.mt < 5)
+healthy <- subset(healthy, subset = percent.mt < 5)
+```
+
+## Normalization
+```{data_normalization}
+# Apply global-scaling normalization method "LogNormalize"
+tumor <- NormalizeData(tumor, normalization.method = "LogNormalize", scale.factor = 10000)
+healthy <- NormalizeData(healthy, normalization.method = "LogNormalize", scale.factor = 10000)
+```
+
+## Variable Genes
+```{hvg}
+# Identify the top 2000 variable features
+tumor <- FindVariableFeatures(tumor, selection.method = "vst", nfeatures = 2000)
+healthy <- FindVariableFeatures(healthy, selection.method = "vst", nfeatures = 2000)
+```
+
+## Scale Data 
+```{scale_data}
+# Scale the data
+tumor <- ScaleData(tumor)
+healthy <- ScaleData(healthy)
+```
+
+## Save Processed Data
+```{save_data}
+saveRDS(tumor, file = "tumor_processed.rds")
+saveRDS(healthy, file = "healthy_processed.rds")
+```
