@@ -1,0 +1,285 @@
+---
+title: "Data_analysis"
+author: "Kristi Fourie"
+date: "2024-05-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Data Analysis
+
+This is a R markdown document where we undergo scRNA seq data analysis of regulatory T cells from tumor and healthy tissue
+
+```{r setup}
+# Load necessary libraries
+library(EnsDb.Hsapiens.v86)  # For mapping Ensembl IDs to gene symbols
+library(AnnotationDbi)       # Provides the `mapIds` function
+library(readr)               # For reading CSV files
+library(dplyr)               # For data manipulation
+library(Seurat)  
+library(ggplot2) 
+library(pheatmap)  
+library(DESeq2)
+library(tidyr)
+library(tibble)
+```
+
+## Load the counts data 
+```{r load_data}
+# Read tumor and healthy count matrices as tibbles
+counts_tumor <- read_csv('./data_tumor_atlas/tumor_raw_counts.csv', col_names = TRUE, show_col_types = FALSE)
+counts_health <- read_csv('./data_healthy_atlas/healthy_raw_counts.csv', col_names = TRUE, show_col_types = FALSE)
+
+# Rename the first column to 'Geneid'
+colnames(counts_tumor)[1] <- 'Geneid'
+colnames(counts_health)[1] <- 'Geneid'
+
+# Convert tibbles to data frames
+counts_tumor <- as.data.frame(counts_tumor)
+counts_health <- as.data.frame(counts_health)
+
+# Set the 'Geneid' column as the row names
+rownames(counts_tumor) <- counts_tumor$Geneid
+counts_tumor <- counts_tumor[,-1]
+
+rownames(counts_health) <- counts_health$Geneid
+counts_health <- counts_health[,-1]
+```
+## Mapping Ensembl IDs to Gene Symbols
+
+```{r mapping}
+# Map Ensembl IDs to gene symbols for the healthy dataset
+ens <- mapIds(EnsDb.Hsapiens.v86,
+              keys = rownames(counts_health),
+              column = 'SYMBOL',
+              keytype = 'GENEID',
+              multiVals = "first")
+
+# Filter out NA values and update row names
+keep <- !is.na(ens)
+ens <- ens[keep]
+counts_health <- counts_health[keep, ]
+```
+
+```{r unique_symbols}
+# Function to ensure unique gene symbols
+make_unique <- function(symbols) {
+  duplicates <- symbols[duplicated(symbols) | duplicated(symbols, fromLast = TRUE)]
+  symbol_counts <- table(duplicates)
+  
+  symbols_out <- symbols
+  for (dup in names(symbol_counts)) {
+    dup_indices <- which(symbols == dup)
+    suffix <- seq_along(dup_indices)
+    symbols_out[dup_indices] <- paste0(dup, "_", suffix)
+  }
+  return(symbols_out)
+}
+
+# Update row names with unique gene symbols
+rownames(counts_health) <- make_unique(ens)
+```
+
+## Post mapping seurat objects
+```{r seurat_object}
+# Create Seurat objects from filtered data
+tumor_seurat <- CreateSeuratObject(counts = counts_tumor, project = "Tumor", min.cells = 3, min.features = 200)
+healthy_seurat <- CreateSeuratObject(counts = counts_health, project = "Healthy", min.cells = 3, min.features = 200)
+```
+
+## Differential Gene Expression
+```{r deseq2}
+# Load required libraries
+library(DESeq2)
+library(tidyr)
+library(tibble)
+
+# Combine tumor and healthy data into one data frame and add metadata
+combined_counts <- cbind(tumor_counts, healthy_counts)
+combined_metadata <- data.frame(
+  sample = colnames(combined_counts),
+  condition = c(rep("Tumor", ncol(tumor_counts)), rep("Healthy", ncol(healthy_counts)))
+)
+
+# Create DESeq2 dataset
+dds <- DESeqDataSetFromMatrix(countData = combined_counts,
+                              colData = combined_metadata,
+                              design = ~ condition)
+
+# Run DESeq2 analysis
+dds <- DESeq(dds)
+
+# Get results
+res <- results(dds)
+res <- res[order(res$padj, na.last = NA), ]
+
+# Save results to a CSV file
+write.csv(as.data.frame(res), file = "deseq2_results.csv")
+```
+
+## Process Data
+Data gets processed again to ensure that it is correctly scaled and normalized
+```{r process_data}
+# Normalize data
+tumor_seurat <- NormalizeData(tumor_seurat, normalization.method = "LogNormalize", scale.factor = 10000)
+healthy_seurat <- NormalizeData(healthy_seurat, normalization.method = "LogNormalize", scale.factor = 10000)
+
+# Find variable features
+tumor_seurat <- FindVariableFeatures(tumor_seurat, selection.method = "vst", nfeatures = 2000)
+healthy_seurat <- FindVariableFeatures(healthy_seurat, selection.method = "vst", nfeatures = 2000)
+
+# Scale data
+tumor_seurat <- ScaleData(tumor_seurat)
+healthy_seurat <- ScaleData(healthy_seurat)
+```
+
+## Dimensionality Reduction and Clustering
+```{r clustering_pca}
+# Perform PCA
+tumor_seurat <- RunPCA(tumor_seurat, features = VariableFeatures(object = tumor_seurat))
+healthy_seurat <- RunPCA(healthy_seurat, features = VariableFeatures(object = healthy_seurat))
+
+# Run UMAP
+tumor_seurat <- RunUMAP(tumor_seurat, dims = 1:30)
+healthy_seurat <- RunUMAP(healthy_seurat, dims = 1:30)
+
+# Find clusters using Leiden algorithm
+tumor_seurat <- FindNeighbors(tumor_seurat, dims = 1:30)
+tumor_seurat <- FindClusters(tumor_seurat, resolution = 0.5)
+
+healthy_seurat <- FindNeighbors(healthy_seurat, dims = 1:30)
+healthy_seurat <- FindClusters(healthy_seurat, resolution = 0.5)
+```
+
+## Visualizing Clusters
+```{r visualise}
+# UMAP plots
+DimPlot(tumor_seurat, reduction = "umap", group.by = "seurat_clusters", label = TRUE) + ggtitle("Tumor Clusters")
+DimPlot(healthy_seurat, reduction = "umap", group.by = "seurat_clusters", label = TRUE) + ggtitle("Healthy Clusters")
+```
+
+## Feature mapping
+```{r visualise}
+# Include additional data to display alongside cell names by passing in a data frame of
+# information.  Works well when using FetchData
+plot1 <- FeaturePlot(tumor_seurat, features = "FOXP3")
+plot2 <- FeaturePlot(tumor_seurat, features = "IL2RA")
+plot3 <- FeaturePlot(healthy_seurat, features = "FOXP3")
+plot4 <- FeaturePlot(healthy_seurat, features = "IL2RA")
+plot1 +  ggmin::theme_powerpoint() + labs(title = "FOXP3 Expression in TME")
+plot2 +  ggmin::theme_powerpoint() + labs(title = "CD25 Expression in TME")
+plot3 +  ggmin::theme_powerpoint() + labs(title = "FOXP3 Expression in Breast Tissue")
+plot4 +  ggmin::theme_powerpoint() + labs(title = "CD25 Expression in Breast Tissue")
+#HoverLocator(plot = plot, information = FetchData(tumor_seurat, vars = c("ident", "PC_1", "nFeature_RNA")))
+```
+
+## Dot Plots of Gene Groups
+```{r dotplots}
+stress_genes_features <- c('HSPA1A', 'HSPA1B', 'DNAJB1', 'DNAJA1', 'HSPA8')
+inflammatory_genes_features <- c('IFITM1', 'DUSP1', 'CD74', 'RAC2', 'DUSP4', 'CXCL13')
+cytoskeleton_genes_features <- c('ACTB', 'PFN1')
+metabolic_genes_features <- c('GAPDH', 'ALDOA', 'PKM')
+transcription_factor_genes_features <- c('FOS', 'JUN')
+
+gene_group = stress_genes_features ##change here accordingly
+
+# Create the DotPlot and customize the axes labels
+DotPlot(tumor_seurat, features = gene_group) + 
+  RotatedAxis() + 
+  ggmin::theme_powerpoint() + 
+  labs(x = "Genes", 
+       y = "Clusters")
+
+DotPlot(healthy_seurat, features = gene_group) + 
+  RotatedAxis() + 
+  ggmin::theme_powerpoint() + 
+  labs(x = "Genes", 
+       y = "Clusters")
+```
+## Extracting expression values
+```{r expression_vals}
+# Extract the expression data for the genes of interest
+expression_data_tumor <- FetchData(tumor_seurat, vars = identifiers)
+expression_data_healthy <- FetchData(healthy_seurat, vars = identifiers)
+
+# Add cluster information to the data
+expression_data_tumor$cluster <- Idents(tumor_seurat)
+expression_data_healthy$cluster <- Idents(healthy_seurat)
+
+# Reshape the data using melt from reshape2
+melted_data_tumor <- melt(expression_data_tumor, id.vars = "cluster", variable.name = "gene", value.name = "expression")
+melted_data_healthy <- melt(expression_data_healthy, id.vars = "cluster", variable.name = "gene", value.name = "expression")
+
+# Calculate the percentage of cells expressing each gene in each cluster
+percentage_expressed_tumor <- melted_data_tumor %>%
+  group_by(cluster, gene) %>%
+  summarise(
+    percent_expressed = sum(expression > 0) / n() * 100,
+    average_expression = mean(expression)
+  )
+
+percentage_expressed_healthy <- melted_data_healthy %>%
+  group_by(cluster, gene) %>%
+  summarise(
+    percent_expressed = sum(expression > 0) / n() * 100,
+    average_expression = mean(expression)
+  )
+
+# Display the results
+print(percentage_expressed_tumor)
+print(percentage_expressed_healthy)
+```
+```{r average_expression}
+# Calculate the average expression of each gene across all clusters
+average_expression <- percentage_expressed_healthy %>%
+  group_by(gene) %>%
+  summarize(avg_percent_expressed = mean(percent_expressed, na.rm = TRUE))
+
+# Print the result
+print(average_expression)
+```
+
+## Find Markers
+```{r find_markers}
+tumor_seurat.markers <- FindAllMarkers(tumor_seurat, only.pos = TRUE)
+healthy_seurat.markers <- FindAllMarkers(healthy_seurat, only.pos = TRUE)
+```
+
+## Average Expression per cluster
+```{r combine}
+# Extract count data and cluster information for tumor samples
+tumor_counts <- as.matrix(GetAssayData(tumor_seurat, slot = "counts"))
+tumor_clusters <- Idents(tumor_seurat)
+
+# Extract count data and cluster information for healthy samples
+healthy_counts <- as.matrix(GetAssayData(healthy_seurat, slot = "counts"))
+healthy_clusters <- Idents(healthy_seurat)
+
+# Function to calculate average expression per cluster
+calculate_avg_expression <- function(counts, clusters) {
+    avg_expression <- counts %>%
+      as.data.frame() %>%
+      rownames_to_column("gene") %>%
+      pivot_longer(-gene, names_to = "cell", values_to = "expression") %>%
+      left_join(data.frame(cell = colnames(counts), cluster = clusters), by = "cell") %>%
+      group_by(gene, cluster) %>%
+      summarize(avg_expression = mean(expression, na.rm = TRUE)) %>%
+      pivot_wider(names_from = cluster, values_from = avg_expression)
+    return(avg_expression)
+}
+
+# Calculate average expression for tumor samples
+tumor_avg_expression <- calculate_avg_expression(tumor_counts, tumor_clusters)
+
+# Calculate average expression for healthy samples
+healthy_avg_expression <- calculate_avg_expression(healthy_counts, healthy_clusters)
+
+# Export average expression to CSV
+write.csv(tumor_avg_expression, file = "tumor_avg_expression.csv", row.names = TRUE)
+write.csv(healthy_avg_expression, file = "healthy_avg_expression.csv", row.names = TRUE)
+```
+
+
