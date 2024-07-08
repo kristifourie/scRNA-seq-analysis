@@ -1,0 +1,110 @@
+---
+title: "scRNA_annotation"
+author: "Kristi Fourie"
+date: "2024-04-04"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## scRNA Annotation of Tregs using SingleR
+
+This document presents an analysis of scRNA-seq data focusing on regulatory T-cell identification and characterization using R packages such as Seurat, SingleCellExperiment, and SingleR.
+
+## Load Libraries and Data
+```{r load-libraries}
+library(celldex)
+library(SingleR)
+library(scRNAseq)
+library(Seurat)
+library(SingleCellExperiment)
+```
+
+## Loadig preprocessed data 
+```{r load-data}
+ref <- MonacoImmuneData()
+seuset_data <- readRDS("tumor_processed.rds") #change to healthy_processed.rds when running on healthy data
+```
+
+## Data Conversion: Seurat to SingleCellExperiment
+```{r data-conversion}
+sce_data <- as.SingleCellExperiment(seuset_data)
+```
+
+## Annotation using SingleR
+```{r annotation}
+results <- SingleR(test = sce_data, ref = ref, labels = ref$label.fine)
+```
+
+## Update Seurat Object with Annotations
+```{r updated-seurat}
+seuset_data <- AddMetaData(seuset_data, results$pruned.labels, col.name = "cell_type")
+```
+
+## Identify and Subset T Cells
+```{r Tcell-subset}
+t_cell_labels <- c("Central memory CD8 T cells", 
+                   "Effector memory CD8 T cells",
+                   "Follicular helper T cells",
+                   "MAIT cells",
+                   "Naive CD4 T cells",
+                   "Naive CD8 T cells",
+                   "Non-Vd2 gd T cells",
+                   "T regulatory cells",
+                   "Terminal effector CD4 T cells",
+                   "Terminal effector CD8 T cells",
+                   "Th1 cells",
+                   "Th1/Th17 cells",
+                   "Th17 cells",
+                   "Th2 cells",
+                   "Vd2 gd T cells")
+pattern <- paste(t_cell_labels, collapse = "|")
+t_cell_indices <- grep(pattern, seuset_data$cell_type)
+t_cells_dataset <- seuset_data[, t_cell_indices]
+```
+
+## Dimensionality Reductions
+```{r dimensionality-reduction}
+# Perform PCA and UMAP if not already present
+if (!"pca" %in% Reductions(t_cells_dataset)) {
+  t_cells_dataset <- RunPCA(t_cells_dataset, verbose = FALSE)
+}
+if (!"umap" %in% Reductions(t_cells_dataset)) {
+  t_cells_dataset <- RunUMAP(t_cells_dataset, reduction = "pca", dims = 1:20)
+}
+```
+
+## Visualisation
+This is done for validation of the Treg labels by visualising known Tregs markers
+```{r visualisation}
+DimPlot(t_cells_dataset, reduction = "umap", group.by = "cell_type", label = TRUE)
+FeaturePlot(t_cells_dataset, features = c('FOXP3', 'CTLA4'))
+
+# Color palette for cell types
+all_cell_types <- unique(t_cells_dataset$cell_type)
+cell_colors <- setNames(rep("grey", length(all_cell_types)), all_cell_types)
+cell_colors["T regulatory cells"] <- "red" # Assign red color to Tregs
+
+# UMAP plot with Tregs highlighted
+DimPlot(t_cells_dataset, reduction = "umap", group.by = "cell_type", label = TRUE, cols = cell_colors)
+```
+
+## Quantification and Saving
+Saving only the Tregs as RDS and the raw count matrix
+```{r saving}
+number_of_tregs <- sum(t_cells_dataset$cell_type == "T regulatory cells")
+
+# Extract raw count matrix of Tregs
+treg_cells <- subset(t_cells_dataset, cells = WhichCells(t_cells_dataset, expression = cell_type == "T regulatory cells"))
+treg_counts <- GetAssayData(treg_cells, slot = "counts")
+
+# Save raw count matrix as CSV
+write.csv(as.matrix(treg_counts), file = "tumor_raw_counts.csv") #change to healthy_raw_counts.csv when running on healthy data
+
+# Save the Seurat object
+saveRDS(t_cells_dataset, file = "tumor_tregs.rds") #change to healthy_tregs.rds when running on healthy data
+```
+
+
