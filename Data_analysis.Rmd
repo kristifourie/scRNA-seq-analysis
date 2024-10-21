@@ -101,13 +101,14 @@ library(tibble)
 combined_counts <- cbind(tumor_counts, healthy_counts)
 combined_metadata <- data.frame(
   sample = colnames(combined_counts),
-  condition = c(rep("Tumor", ncol(tumor_counts)), rep("Healthy", ncol(healthy_counts)))
+  condition = c(rep("Tumor", ncol(counts_tumor)), rep("Healthy", ncol(counts_health))),
+  batch = c(rep("Batch1", ncol(counts_tumor)), rep("Batch2", ncol(counts_health)))  # Add the correct batch information
 )
 
 # Create DESeq2 dataset
 dds <- DESeqDataSetFromMatrix(countData = combined_counts,
                               colData = combined_metadata,
-                              design = ~ condition)
+                              design = ~ batch + condition)
 
 # Run DESeq2 analysis
 dds <- DESeq(dds)
