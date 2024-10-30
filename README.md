@@ -80,7 +80,7 @@ All statistical analyses were performed using R (v4.3.3). P values were two-tail
 To reproduce the analysis, follow these steps:
 
 1. Clone the repository.
-2. Download the raw count matrices from the cell atlases and place them in the wd directories.
+2. Download the raw count matrices from the cell atlases and place them in the working directory.
 3. Open the `processing.Rmd` file and run the chunks sequentially to process the data.
 4. Open the `scRNA_annotation.Rmd` to annotate the Tregs
 5. Open the `Data_analysis.Rmd` file and run the chunks sequentially to analyse the data.
