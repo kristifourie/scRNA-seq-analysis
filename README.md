@@ -2,7 +2,7 @@
 
 ## Overview
 
-This repository contains the code and data for the single-cell RNA sequencing (scRNA-seq) analysis of regulatory T cells (Tregs) from breast tumor and healthy breast tissue. The study aims to explore the distinct states and functional categories of Tregs within the tumor microenvironment (TME) and normal breast tissue (NBT).
+This repository contains the code and instructions on obtaining data for the single-cell RNA sequencing (scRNA-seq) analysis of regulatory T cells (Tregs) from breast tumor and healthy breast tissue. The study aims to explore the distinct states and functional categories of Tregs within the tumor microenvironment (TME) and normal breast tissue (NBT).
 
 ## Table of Contents
 
